@@ -2,8 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-from sklearn.ensemble import IsolationForest
-from sklearn.preprocessing import StandardScaler
 
 st.set_page_config(page_title="360° Attack Detection", layout="wide")
 st.title("🚨 360° API Attack Detection System")
@@ -55,31 +53,6 @@ def user_ip_summary(df, name):
         .sort_values('Unique Users', ascending=False)
         .assign(attack_type=name)
     )
-
-def extract_features_for_model(df):
-    df['request_path_len'] = df['request_path'].astype(str).str.len()
-    df['ua_len'] = df['user_agent'].astype(str).str.len()
-    df['duration'] = pd.to_numeric(df['duration'], errors='coerce').fillna(0)
-
-    # Number of requests per IP
-    req_per_ip = df.groupby('x_real_ip').size().rename('request_count').reset_index()
-    df = df.merge(req_per_ip, on='x_real_ip', how='left')
-
-    features = df[[
-        'duration',
-        'request_path_len',
-        'ua_len',
-        'request_count'
-    ]].fillna(0)
-
-    scaler = StandardScaler()
-    features_scaled = scaler.fit_transform(features)
-    return features_scaled, df
-
-def train_isolation_forest(X, contamination=0.02):
-    model = IsolationForest(n_estimators=100, contamination=contamination, random_state=42)
-    model.fit(X)
-    return model
 
 if uploaded_file:
     with st.spinner("Reading file..."):
@@ -143,24 +116,3 @@ if uploaded_file:
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info(f"No suspicious activity detected for {label}.")
-
-    # 👇 ML-based Anomaly Detection
-    st.subheader("🤖 ML-based Anomaly Detection (Isolation Forest)")
-    with st.spinner("Extracting features and training Isolation Forest model..."):
-        X_scaled, df = extract_features_for_model(df)
-        model = train_isolation_forest(X_scaled)
-        df['anomaly_score'] = model.decision_function(X_scaled)
-        df['is_anomaly'] = model.predict(X_scaled)
-
-    st.subheader("🚩 Anomalous Requests (Predicted by ML Model)")
-    anomaly_df = df[df['is_anomaly'] == -1]
-    st.dataframe(anomaly_df[['start_time', 'x_real_ip', 'dr_uid', 'request_path', 'duration', 'user_agent']].head(20))
-
-    st.subheader("📉 Anomaly Score Distribution")
-    fig = px.histogram(df, x='anomaly_score', nbins=50, title="Anomaly Score Distribution (Lower = More Suspicious)")
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.subheader("🕵️ Top Suspicious IPs (by ML Prediction)")
-    top_ips = anomaly_df['x_real_ip'].value_counts().head(10).reset_index()
-    top_ips.columns = ['IP Address', 'Suspicious Request Count']
-    st.dataframe(top_ips)
