@@ -24,11 +24,10 @@ def detect_brute_force(df):
     grouped = brute_df.groupby(['x_real_ip', 'minute']).size().reset_index(name='count')
     brute_ips = grouped[grouped['count'] > 5]['x_real_ip'].unique()
     return df[df['x_real_ip'].isin(brute_ips)]
+
 def detect_brute_force_by_endpoint(df, endpoints, threshold=5):
-    import pandas as pd
     if 'minute' not in df.columns:
         df['minute'] = pd.to_datetime(df['start_time']).dt.floor('min')
-
     results = {}
     for label, path in endpoints.items():
         api_df = df[df['request_path'] == path]
@@ -37,7 +36,6 @@ def detect_brute_force_by_endpoint(df, endpoints, threshold=5):
         flagged_df = api_df[api_df['x_real_ip'].isin(flagged_ips)]
         results[label] = flagged_df[['x_real_ip', 'dr_uid', 'start_time', 'request_path']]
     return results
-
 
 def detect_vpn_geo(df):
     geo = df.groupby('dr_uid')['x_country_code'].nunique().reset_index()
@@ -75,7 +73,6 @@ def extract_features_for_model(df):
     df['ua_len'] = df['user_agent'].astype(str).str.len()
     df['duration'] = pd.to_numeric(df['duration'], errors='coerce').fillna(0)
 
-    # Number of requests per IP
     req_per_ip = df.groupby('x_real_ip').size().rename('request_count').reset_index()
     df = df.merge(req_per_ip, on='x_real_ip', how='left')
 
@@ -124,6 +121,13 @@ if uploaded_file:
                 user_ip_summary(ddos_df, "DDoS")
             ])
 
+            endpoints = {
+                "Sign Up Abuse": "/user/signup",
+                "Login Brute Force": "/v3.1/login",
+                "Custom Module Misuse": "/v3.1/custom_module/6806d80b79f13e718895ffdc/result"
+            }
+            brute_by_endpoint = detect_brute_force_by_endpoint(df, endpoints)
+
         st.success("✅ Detection completed!")
 
         st.subheader("📊 Attack Summary by Platform")
@@ -148,17 +152,27 @@ if uploaded_file:
             [brute_df, vpn_df, bot_df, ddos_df]
         ):
             st.subheader(label)
-
             if not df_attack.empty:
                 st.dataframe(df_attack[['start_time', 'x_real_ip', 'request_path', 'dr_uid']].head(10))
-
                 chart_data = df_attack.groupby('minute').size().reset_index(name='Request Count')
                 fig = px.line(chart_data, x='minute', y='Request Count', title=f"{label} Over Time")
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info(f"No suspicious activity detected for {label}.")
 
-    # 👇 ML-based Anomaly Detection
+        # New Section: API-Level Brute Force
+        st.subheader("🧠 API-Level Brute Force Detection")
+        for label, data in brute_by_endpoint.items():
+            st.markdown(f"#### {label}")
+            if not data.empty:
+                st.dataframe(data.head(10))
+                chart = data.groupby(data['start_time'].dt.floor('T')).size().reset_index(name='Request Count')
+                fig = px.line(chart, x='start_time', y='Request Count', title=f"{label} - Frequency Over Time")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info(f"No suspicious activity detected for {label}.")
+
+    # ML-based Anomaly Detection
     st.subheader("🤖 ML-based Anomaly Detection (Isolation Forest)")
     with st.spinner("Extracting features and training Isolation Forest model..."):
         X_scaled, df = extract_features_for_model(df)
