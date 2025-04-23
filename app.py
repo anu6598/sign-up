@@ -24,6 +24,20 @@ def detect_brute_force(df):
     grouped = brute_df.groupby(['x_real_ip', 'minute']).size().reset_index(name='count')
     brute_ips = grouped[grouped['count'] > 5]['x_real_ip'].unique()
     return df[df['x_real_ip'].isin(brute_ips)]
+def detect_brute_force_by_endpoint(df, endpoints, threshold=5):
+    import pandas as pd
+    if 'minute' not in df.columns:
+        df['minute'] = pd.to_datetime(df['start_time']).dt.floor('min')
+
+    results = {}
+    for label, path in endpoints.items():
+        api_df = df[df['request_path'] == path]
+        grouped = api_df.groupby(['x_real_ip', 'minute']).size().reset_index(name='count')
+        flagged_ips = grouped[grouped['count'] > threshold]['x_real_ip'].unique()
+        flagged_df = api_df[api_df['x_real_ip'].isin(flagged_ips)]
+        results[label] = flagged_df[['x_real_ip', 'dr_uid', 'start_time', 'request_path']]
+    return results
+
 
 def detect_vpn_geo(df):
     geo = df.groupby('dr_uid')['x_country_code'].nunique().reset_index()
